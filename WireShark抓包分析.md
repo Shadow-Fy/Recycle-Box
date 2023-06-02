@@ -208,3 +208,166 @@ ping命令是个使用频率极高的 **网络诊断工具** ，在Windows、Uni
 下图中 161 号包到 163号包即 3 次握手
 
 ![image-20230526201354281](https://shadow-fy.oss-cn-chengdu.aliyuncs.com/img/202305262013414.png)
+
+
+
+## TLSv2
+
+在浏览器访问网址时会出现 TLSv1.2 协议的包，分析一下这个是来做什么的：
+
+> 正常来说三次握手之后应该显示的是 HTTP 协议的包，而现在我们的浏览器随便打开一个网址你会发现是 HTTPS ，HTTP是明文传输的协议，可能受到第三方的攻击，非常不安全，因此诞生了 HTTPS
+>
+> 这个 “S“ 表示的是 SSL/TLS 协议，用公式说明就是 HTTPS = HTTP + SSL(TLS)
+>
+> 其中 SSL 即安全套接层，处于 OSI 七层模型中的会话层
+>
+> 通过抓包会发现，HTTPS 首次通信一共需要握手 7 次， TCP 三次握手和之后的 TLS四次握手
+
+SSL/TLS是一种密码通信框架，他是世界上使用最广泛的密码通信方法。SSL/TLS综合运用了密码学中的对称密码，消息认证码，公钥密码，数字签名，伪随机数生成器等，可以说是密码学中的集大成者。
+
+为了防止网络犯罪分子通过互联网访问敏感数据，人们引入了各种加密协议。TLS(Transport Layer Security) 安全传输层协议，是 SSL(Secure Socket Layer) 安全套接层协议的后续版本。
+
+![img](https://shadow-fy.oss-cn-chengdu.aliyuncs.com/img/202305271744362.webp)
+
+> （可以作为一个了解）
+>
+> TLS的三个作用
+> （1）身份认证
+> 通过证书认证来确认对方的身份，防止中间人攻击
+> （2）数据私密性
+> 使用对称性密钥加密传输的数据，由于密钥只有客户端/服务端有，其他人无法窥探。
+> （3）数据完整性
+> 使用摘要算法对报文进行计算，收到消息后校验该值防止数据被篡改或丢失。
+
+### HTTPS 建立连接——四次握手
+
+![](https://shadow-fy.oss-cn-chengdu.aliyuncs.com/img/202305281253155.png)
+
+1. 浏览器给出协议版本号、一个客户端生成的随机数（Client random），以及客户端支持的加密方法。
+2. 服务器确认双方使用的加密方法，使用的tls版本号和一个随机数。
+3. 并给出数字证书、以及一个服务器运行Diffie-Hellman算法生成的参数，比如pubkey。
+4. 浏览器获取服务器发来的pubkey，计算出另一个pubkey，发给服务器。
+5. 服务器发给浏览器一个session ticket。
+
+
+
+用浏览器访问 www.baidu.com 然后进行抓包测试一下，网址的 IP 地址可以使用 cmd 的 ping 命令找到（120.232.145.144 需要自己 ping 一下才知道，因为可能会有变化），然后通过过滤器查看所有源IP地址或目的IP地址是 120.232.145.144 并且是 TLSv1.2 协议的数据包
+
+![image-20230602124302400](https://shadow-fy.oss-cn-chengdu.aliyuncs.com/img/202306021243507.png)
+
+
+
+#### 第一次握手：
+
+##### Client Hello：
+
+客户端（浏览器）发送 `Client Hello` 消息给服务器，进行打招呼，并且提供一些信息。*（ 984 号包）*
+
+> 1. 支持的协议版本，比如 TLSv1.2 。（Version）
+> 2. 客户端生成的随机数，用于加密 (Random)
+> 3. 用于复用 TLS 连接，防止资源的浪费。但这个要服务端支持才行。（Session ID)
+> 4. 客户端支持的密码学套件，按客户端偏好排序，如果服务端没有可支持的，那就回应错误（returns a handshake failure alert）并关闭连接。(Cipher Suites)
+> 4. 客户端支持的压缩方法（Compression Methods）
+
+![image-20230602141103828](https://shadow-fy.oss-cn-chengdu.aliyuncs.com/img/202306021411882.png)
+
+
+
+#### 第二次握手：
+
+##### Server Hello：
+
+服务器收到客户端的消息 `Client Hello` 后，回复消息 `Server Hello` 消息。*（ 1011 号包）*
+
+> 1. 服务器确认支持客户端的 TLS 版本（Version）
+> 2. 服务器生成的随机数（Random）
+> 3. 服务端返回的会话 ID（Session ID）
+>    + 如果客户端刚刚发过来的 session_id 服务端已经有了缓存，并且同意复用连接，则返回一个和客户端刚刚发来的相同的 session_id。
+>    + 也可以发送一个新的 session_id，以便客户端下次将其携带并且复用。
+>    + 也可以回复一个空值，表示不缓存 session_id，因此也不会复用。
+> 4. 服务器从客户端发来的加密套件列表中选出一个最合适的加密组合（Cipher Suite）
+>    + 用 ECDHE_RSA 作为秘钥交换算法，用 AES_128 作为通信时的对称加密算法，用 SHA256 作为哈希算法。 
+> 3. 选择的压缩算法
+
+![image-20230602142135934](https://shadow-fy.oss-cn-chengdu.aliyuncs.com/img/202306021421986.png)
+
+
+
+##### Certificate：
+
+随后服务器为了证明身份，会给客户端发送数字证书，即 `Certificate` 消息 *（ 1014 号包）*
+
+> 1. 证书版本号 (version)
+> 2. 证书序列号，这个每个颁发机构是唯一的（serialNumber）
+> 3. 签名算法（signature）
+>    + 表示用 sha256 这个哈希算法对证书进行哈希生成摘要，然后再用 RSA 这个非对称加密算法，用 CA 的私钥加密刚刚生成的摘要，形成数字签名。
+> 4. 颁发者信息
+> 5. 证书有效期
+> 6. 证书持有者信息
+> 7. 证书公钥
+
+![image-20230602143818987](https://shadow-fy.oss-cn-chengdu.aliyuncs.com/img/202306021438044.png)
+
+
+
+##### Server Key Exchange:
+
+用于生成 `Premaster secret` *（ 1014 号包）*
+
+![image-20230602150011181](https://shadow-fy.oss-cn-chengdu.aliyuncs.com/img/202306021500229.png)
+
+##### Server Hello Done：
+
+最后，服务器发送 `Server Hello Done` 消息给客户端，只是通知客户端第二次握手完毕*（ 1014 号包）*
+
+![image-20230602132243288](https://shadow-fy.oss-cn-chengdu.aliyuncs.com/img/202306021322330.png)
+
+
+
+#### 第三次握手：
+
+##### Client Key Exchange:
+
+用于生成 `premaster secret` ，同之前的 `ServerKeyExchange` 配合使用的。*（1036 号包）*
+
+客户端给服务端一个用于 ECDHE 算法的公钥：0427282f4fc27c8ec96448af2e38d5af72a4a9b9dfe7e1744a37cdae2bd621ccdec878f1f964222208346bff89e6d23f56c9465225471d4e0425a6a7728a0201dc
+
+> 在 `Client Hello` 和 `Server Hello` 中生成打的两个随机数，加上 ECDHE 算法得到的公钥一起计算出最终的对称加密秘钥 master_secret
+>
+> 一旦双方协商出来了这个相同的对称秘钥，那就可以开始愉快地安全通信了，TLS 层的工作也就圆满完成
+
+![image-20230602151530913](https://shadow-fy.oss-cn-chengdu.aliyuncs.com/img/202306021515959.png)
+
+##### 
+
+##### Change Cipher Spec:
+
+秘钥改变通知，客户端通过 `Change Cipher Spec` 消息将`Master Secret` 对称密钥发送给服务器，并通知服务器开始使用对称加密的方式进行通信。*（1036 号包）*
+
+> 在此之前的握手消息都是明文的，但只要出现了"Change Cipher Spec" 消息，之后的握手消息就都是密文了，wireshark抓到的数据包也会是乱码。
+
+![image-20230602160037917](https://shadow-fy.oss-cn-chengdu.aliyuncs.com/img/202306021600961.png)
+
+
+
+##### Encrypted Handshake Message:
+
+最后，客户端发送 `Encrypted Handshake Message` 消息，将之前发送的所有数据做成摘要，使用`Master Secret` 对称密钥加密（这条消息已经是对称加密），供服务器验证之前握手过程中的数据是否被其他人篡改。*（1036 号包）*
+
+![image-20230602163445992](https://shadow-fy.oss-cn-chengdu.aliyuncs.com/img/202306021634045.png)
+
+
+
+#### 第四次握手：
+
+##### Change Cipher Spec :
+
+  服务器在收到客户端的 Client Key Exchange 消息后，使用RSA私钥对其解密，得到客户端生成的随机数 PreMaster，至此服务器也拥有了与客户端相同的三个随机数：Client Random、Server Random、PreMaster，服务器也使用这三个随机数计算对称密钥，将计算后的结果通过 Change Cipher Spec 消息返回给客户端。
+（RSA非对称加密的作用就在于 对第三个随机数"PreMaster"的加密，前面两个随机数都是公开的）
+
+
+
+##### Encrypted Handshake Message :
+
+  服务器通过 Encrypted Handshake Message 消息将之前握手过程中的数据生成的摘要 使用对称密钥加密后 发给 客户端，供客户端进行验证。至此TLS四次握手完毕。
+
